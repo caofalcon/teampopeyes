@@ -1,0 +1,22 @@
+gcc -DDEBUG -o sysprobe sysprobe.c
+endian probe results: little
+probe flags: -DBYTES_LITTLE_ENDIAN -DWORDS_LITTLE_ENDIAN -DFAST_SRL -DFAST_SRA -DGZIP_PATH="/bin/gzip"
+probe libs: -lm
+gcc `./sysprobe -flags` -DDEBUG -O0 -g -Wall   -c sim-fast.c
+gcc `./sysprobe -flags` -DDEBUG -O0 -g -Wall   -c main.c
+gcc `./sysprobe -flags` -DDEBUG -O0 -g -Wall   -c syscall.c
+gcc `./sysprobe -flags` -DDEBUG -O0 -g -Wall   -c memory.c
+gcc `./sysprobe -flags` -DDEBUG -O0 -g -Wall   -c regs.c
+gcc `./sysprobe -flags` -DDEBUG -O0 -g -Wall   -c loader.c
+gcc `./sysprobe -flags` -DDEBUG -O0 -g -Wall   -c endian.c
+gcc `./sysprobe -flags` -DDEBUG -O0 -g -Wall   -c dlite.c
+gcc `./sysprobe -flags` -DDEBUG -O0 -g -Wall   -c symbol.c
+gcc `./sysprobe -flags` -DDEBUG -O0 -g -Wall   -c eval.c
+gcc `./sysprobe -flags` -DDEBUG -O0 -g -Wall   -c options.c
+gcc `./sysprobe -flags` -DDEBUG -O0 -g -Wall   -c stats.c
+gcc `./sysprobe -flags` -DDEBUG -O0 -g -Wall   -c eio.c
+gcc `./sysprobe -flags` -DDEBUG -O0 -g -Wall   -c range.c
+gcc `./sysprobe -flags` -DDEBUG -O0 -g -Wall   -c misc.c
+gcc `./sysprobe -flags` -DDEBUG -O0 -g -Wall   -c machine.c
+gcc `./sysprobe -flags` -DDEBUG -O0 -g -Wall   -c tomasulo.c
+Makefile:407: recipe for target 'tomasulo.o' failed
