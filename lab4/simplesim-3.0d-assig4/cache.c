@@ -607,14 +607,21 @@ int stride_prefetcher_modified(struct cache_t *cp, md_addr_t addr) {
 
 /* Open Ended Prefetcher */
 void open_ended_prefetcher(struct cache_t *cp, md_addr_t addr) {
+    // ECE552 Assignment 4 - BEGIN CODE */
     int strideAnswered = 0;
     int i;
     md_addr_t fetch_addr;
 
-    //stride_prefetcher(cp, addr);
+    // update the modified stride prefetcher
+    // use its prediction if it is in steady
     strideAnswered = stride_prefetcher_modified(cp, addr);
+
+    // check if the current address access is a miss, skip if it isn't
     if (previous_misses == cp->misses) return;
+    // update the miss tracker
     previous_misses = cp->misses;
+    
+    // return if stride prefetcher returned a value
     if (strideAnswered != 0) return;
 
     // only prefetch if there was a miss
@@ -647,7 +654,8 @@ void open_ended_prefetcher(struct cache_t *cp, md_addr_t addr) {
     cp->ghb[ghb_table_tail].prev = -1;
     ghb_table_tail = (ghb_table_tail + 1) % GHB_SIZE;
     
-    // do prefetching
+    // Delta-Correlation
+
     // find the most recent delta pair
     int deltaPair[3] = {0, 0, 0};
     int idxListHead = cp->index_table[index_table_index].head;
@@ -674,7 +682,23 @@ void open_ended_prefetcher(struct cache_t *cp, md_addr_t addr) {
     }
 
     int foundAPrefetchPair = 0;
+    
     // find deltas by subtracting the addresses between list items
+
+    // keeping track of the past 4 delta values that we calculate in a table called deltaTable, 
+    // if the two most recent deltas, calculated above, match a pair of deltas in the history
+    // then the delta values following the pair in history predicts a future address delta
+    
+    //         head  headNext
+    // ADDR:  [ 100 ] [ 99 ] [ 95 ] [ 93 ] [ 90 ] [ 89 ] [ 88 ] [ 84 ]
+    // DELTA:      [ 1 ]  [ 4 ]  [ 2 ]  [ 3 ]  [ 1 ]  [ 1 ]  [ 4 ]
+    //             -deltaPair-          -prediction-  ---match----
+    //                                  ------- deltaTable -------
+    //
+    // we only need the four most recent calculated delta values because this is enough information
+    // to match to the deltaPair, and draw a 2-broad prediction
+
+
     // printf("%d %d\n", deltaPair[0], deltaPair[1]);
     // printf("Delta Table: ");
     i = 0;
@@ -720,68 +744,75 @@ void open_ended_prefetcher(struct cache_t *cp, md_addr_t addr) {
             if (deltaPair[1] != deltaPair[0] && !cache_probe(cp, fetch_addr)) {
                 cache_access(cp, Read, fetch_addr, NULL, cp->bsize, 0, NULL, NULL, 1);
                 //cache_access(cp, Read, (addr + (deltaPair[1] << 1)) & ~(cp->bsize - 1), NULL, cp->bsize, 0, NULL, NULL, 1);
-            }
+            }/* else {
+                fetch_addr = (addr + (deltaPair[0] << 1)) & ~(cp->bsize - 1);
+                if (!cache_probe(cp, fetch_addr)) {
+                    cache_access(cp, Read, fetch_addr, NULL, cp->bsize, 0, NULL, NULL, 1);
+                }
+            }*/
             //return;
         }
     }
 
-    // check for correlation
-    int possiblePredictions[CORRELATION_VEC_LENGTH];
-    int correspondingCounts[CORRELATION_VEC_LENGTH];
-    for (i=0; i < CORRELATION_VEC_LENGTH; i++) {
-        possiblePredictions[i] = -1;
-        correspondingCounts[i] = 0;
-    }
-    currGHBEntry = headNext;
-    int currentSpotInPred = 0;
-    int predictionToBeMade = 0;
-    int addrWasFound;
-    int sumTotal;
-    // find address correlation
-    while (currGHBEntry != -1) {
-        sumTotal = 0;
-        md_addr_t currAddr = cp->ghb[currGHBEntry].addr;
-        addrWasFound = 0;
-        //printf("%d\t", currAddr);
-        for (i=0; i < CORRELATION_VEC_LENGTH; i++) {
-            if (possiblePredictions[i] == currAddr) {
-                correspondingCounts[i]++;
-                addrWasFound = 1;
-            }
-            sumTotal += correspondingCounts[i];
-        }
-        if ((currentSpotInPred < CORRELATION_VEC_LENGTH) && !addrWasFound) {
-            possiblePredictions[currentSpotInPred] = currAddr;
-            correspondingCounts[i]++;
-            currentSpotInPred++;
-        }
-        currGHBEntry = cp->ghb[currGHBEntry].next;
-    }
-    //printf("\n");
+    // check for correlation - doesn't contribute significantly to functionality 
 
-    for (i=0; i < CORRELATION_VEC_LENGTH; i++) {
-        if (correspondingCounts[predictionToBeMade] < correspondingCounts[i]) {
-            fetch_addr = possiblePredictions[i] & ~(cp->bsize - 1);
-            if (!cache_probe(cp, fetch_addr)) {
-                predictionToBeMade = i;
-            }
-        }
-    }
+    // int possiblePredictions[CORRELATION_VEC_LENGTH];
+    // int correspondingCounts[CORRELATION_VEC_LENGTH];
+    // for (i=0; i < CORRELATION_VEC_LENGTH; i++) {
+    //     possiblePredictions[i] = -1;
+    //     correspondingCounts[i] = 0;
+    // }
+    // currGHBEntry = headNext;
+    // int currentSpotInPred = 0;
+    // int predictionToBeMade = 0;
+    // int addrWasFound;
+    // int sumTotal;
+    // // find address correlation
+    // while (currGHBEntry != -1) {
+    //     sumTotal = 0;
+    //     md_addr_t currAddr = cp->ghb[currGHBEntry].addr;
+    //     addrWasFound = 0;
+    //     //printf("%d\t", currAddr);
+    //     for (i=0; i < CORRELATION_VEC_LENGTH; i++) {
+    //         if (possiblePredictions[i] == currAddr) {
+    //             correspondingCounts[i]++;
+    //             addrWasFound = 1;
+    //         }
+    //         sumTotal += correspondingCounts[i];
+    //     }
+    //     if ((currentSpotInPred < CORRELATION_VEC_LENGTH) && !addrWasFound) {
+    //         possiblePredictions[currentSpotInPred] = currAddr;
+    //         correspondingCounts[i]++;
+    //         currentSpotInPred++;
+    //     }
+    //     currGHBEntry = cp->ghb[currGHBEntry].next;
+    // }
+    // printf("\n");
 
-    if (correspondingCounts[predictionToBeMade] > 1) {
-        fetch_addr = possiblePredictions[predictionToBeMade] & ~(cp->bsize - 1);
-        if (!cache_probe(cp, fetch_addr)) {
-            //cache_access(cp, Read, fetch_addr, NULL, cp->bsize, 0, NULL, NULL, 1);
-        }
-        //cache_access(cp, Read, possiblePredictions[predictionToBeMade] & ~(cp->bsize - 1), NULL, cp->bsize, 0, NULL, NULL, 1);
-    }
+    // for (i=0; i < CORRELATION_VEC_LENGTH; i++) {
+    //     if (correspondingCounts[predictionToBeMade] < correspondingCounts[i]) {
+    //         fetch_addr = possiblePredictions[i] & ~(cp->bsize - 1);
+    //         if (!cache_probe(cp, fetch_addr)) {
+    //             predictionToBeMade = i;
+    //         }
+    //     }
+    // }
+
+    // if (correspondingCounts[predictionToBeMade] > 1) {
+    //     fetch_addr = possiblePredictions[predictionToBeMade] & ~(cp->bsize - 1);
+    //     if (!cache_probe(cp, fetch_addr)) {
+    //         //cache_access(cp, Read, fetch_addr, NULL, cp->bsize, 0, NULL, NULL, 1);
+    //     }
+    //     //cache_access(cp, Read, possiblePredictions[predictionToBeMade] & ~(cp->bsize - 1), NULL, cp->bsize, 0, NULL, NULL, 1);
+    // }
 
 
     
-    //cache_access(cp, Read, (cp->ghb[(headNext + 1) % GHB_SIZE].addr) & ~(cp->bsize - 1), NULL, cp->bsize, 0, NULL, NULL, 1);
-    //next_line_prefetcher(cp, addr);
-    //cache_access(cp, Read, (cp->ghb[(headNextNext + 1) % GHB_SIZE].addr) & ~(cp->bsize - 1), NULL, cp->bsize, 0, NULL, NULL, 1);
+    // cache_access(cp, Read, (cp->ghb[(headNext + 1) % GHB_SIZE].addr) & ~(cp->bsize - 1), NULL, cp->bsize, 0, NULL, NULL, 1);
+    // next_line_prefetcher(cp, addr);
+    // cache_access(cp, Read, (cp->ghb[(headNextNext + 1) % GHB_SIZE].addr) & ~(cp->bsize - 1), NULL, cp->bsize, 0, NULL, NULL, 1);
     
+    // ECE552 Assignment 4 - END CODE */
 }
 
 /* Stride Prefetcher */
