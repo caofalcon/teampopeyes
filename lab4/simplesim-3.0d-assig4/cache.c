@@ -417,14 +417,15 @@ cache_create(char *name,		/* name of the cache */
       cp->rpt_table[i].tag = 0;
   }
   for (i = 0; i < INDEX_TABLE_SIZE; i++) {
-      cp->index_table[i].head = NULL;
+      cp->index_table[i].head = -1;
   }
   for (i = 0; i < GHB_SIZE; i++) {
       cp->ghb[i].addr = 0;
-      cp->ghb[i].prev = NULL;
-      cp->ghb[i].next = NULL;
+      cp->ghb[i].prev = -1;
+      cp->ghb[i].next = -1;
   }
   ghb_table_tail = 0;
+  glbcounter = 0;
   /* ECE552 Assignment 4 - END CODE */
 
   return cp;
@@ -538,49 +539,69 @@ void open_ended_prefetcher(struct cache_t *cp, md_addr_t addr) {
     //
     md_addr_t index_table_index = get_PC() & (INDEX_TABLE_SIZE-1);
     // get the pointer to the previous head
-    ghb_row* prev_head = cp->index_table[index_table_index].head;
+    int prev_head = cp->index_table[index_table_index].head;
     // check what's on the tail right now, and take it off
-    if (cp->ghb[ghb_table_tail].prev != NULL) {
-        cp->ghb[ghb_table_tail].prev->next = NULL;
+    if (cp->ghb[ghb_table_tail].prev != -1) {
+        cp->ghb[cp->ghb[ghb_table_tail].prev].next = -1;
     }
     // make the new head the entry on the tail
-    cp->index_table[index_table_index].head = &(cp->ghb[ghb_table_tail]);
-    cp->ghb[ghb_table_tail].next = prev_head;
-    if (prev_head != NULL) {
-        prev_head->prev = &(cp->ghb[ghb_table_tail]);
+    cp->index_table[index_table_index].head = ghb_table_tail;
+    if (prev_head == ghb_table_tail) {
+        cp->ghb[ghb_table_tail].next = NULL;
+    } else {
+        cp->ghb[ghb_table_tail].next = prev_head;
+    }
+    cp->ghb[ghb_table_tail].prev = -1;
+    if (prev_head != -1) {
+        cp->ghb[prev_head].prev = ghb_table_tail;
     }
     cp->ghb[ghb_table_tail].addr = addr;
     // grow the queue, circular list
+    int i;
+    for (i = 0; i < INDEX_TABLE_SIZE; i++) {
+        if (i == index_table_index) continue;
+        if (cp->index_table[i].head == ghb_table_tail) {
+            cp->index_table[i].head = -1;
+        }
+    }
+    for (i = 0; i < GHB_SIZE; i++) {
+        if (cp->ghb[i].next == ghb_table_tail) {
+            cp->ghb[i].next = -1;
+        }
+    }
     ghb_table_tail = (ghb_table_tail + 1) % GHB_SIZE;
     
     // do prefetching
     // find the most recent delta pair
     int deltaPair[2] = {0, 0};
-    ghb_row* idxListHead = cp->index_table[index_table_index].head;
-    ghb_row* headNext = idxListHead->next;
-    ghb_row* headNextNext = NULL;
-    if (headNext == NULL) {
+    int idxListHead = cp->index_table[index_table_index].head;
+    int headNext = cp->ghb[idxListHead].next;
+    int headNextNext = -1;
+    if (headNext == -1) {
+        stride_prefetcher(cp,addr);
         return;
     }
-    deltaPair[0] = idxListHead->addr - headNext->addr;
-    headNextNext = headNext->next;
-    if (headNextNext == NULL) {
+    deltaPair[0] = cp->ghb[idxListHead].addr - cp->ghb[headNext].addr;
+    headNextNext = cp->ghb[headNext].next;
+    if (headNextNext == -1) {
+        stride_prefetcher(cp,addr);
         return;
     }
-    deltaPair[1] = headNext->addr - headNextNext->addr;
+    deltaPair[1] = cp->ghb[headNext].addr - cp->ghb[headNextNext].addr;
 
-    ghb_row* currGHBEntry = headNextNext;
-    ghb_row* nextGHBEntry = headNextNext->next;
+    int currGHBEntry = headNextNext;
+    int nextGHBEntry = cp->ghb[headNextNext].next;
     int calculatedDelta;
-    int i = 0;
+    i = 0;
     // initialize some kind of delta table
     int deltaTable[4];
     int foundAPrefetchPair = 0;
-
+    glbcounter++;
     // find deltas by subtracting the addresses between list items
-    while (nextGHBEntry != NULL && !foundAPrefetchPair) {
+    while ((nextGHBEntry != -1) && (!foundAPrefetchPair)) {
+        //printf("%d - currGHBEntry = %d\n", i, currGHBEntry);
         // calculate delta between next pair
-        calculatedDelta = currGHBEntry->addr - nextGHBEntry->addr;
+        calculatedDelta = cp->ghb[currGHBEntry].addr - cp->ghb[nextGHBEntry].addr;
         // store calculated delta in table, find when the deltaPair occurred before
         deltaTable[i] = calculatedDelta;
 
@@ -593,14 +614,17 @@ void open_ended_prefetcher(struct cache_t *cp, md_addr_t addr) {
         }
 
         currGHBEntry = nextGHBEntry;
-        nextGHBEntry = nextGHBEntry->next;
+        nextGHBEntry = cp->ghb[nextGHBEntry].next;
         i = (i + 1) % 4;
     }
 
     // prefetch the match
     if (foundAPrefetchPair) {
+        //printf("Found a prefetch pair!\n");
         cache_access(cp, Read, (addr + deltaPair[0]) & ~(cp->bsize - 1), NULL, cp->bsize, 0, NULL, NULL, 1);
-        cache_access(cp, Read, (addr + deltaPair[1]) & ~(cp->bsize - 1), NULL, cp->bsize, 0, NULL, NULL, 1);
+        //cache_access(cp, Read, (addr + deltaPair[1]) & ~(cp->bsize - 1), NULL, cp->bsize, 0, NULL, NULL, 1);
+    } else {
+        stride_prefetcher(cp,addr);
     }
 }
 

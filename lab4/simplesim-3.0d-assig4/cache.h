@@ -128,16 +128,17 @@ typedef struct RPT_Row {
 // next item in ghbTable is just next in 
 typedef struct ghbEntry {
 	md_addr_t addr;
-	struct ghbEntry* next;
-	struct ghbEntry* prev;
+	int next;
+	int prev;
 } ghb_row;
 
 // key for index table row is just 
 typedef struct {
-	ghb_row* head;
+	int head;
 } index_table_row;
 
 int ghb_table_tail;
+int glbcounter;
 
 /* ECE552 Assignment 4 - END CODE */
 
