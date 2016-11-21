@@ -110,6 +110,8 @@ enum cache_policy {
 #define RPT_TABLE_SIZE 512
 #define INDEX_TABLE_SIZE 256
 #define GHB_SIZE 256
+#define DELTA_TABLE_SIZE 4
+#define CORRELATION_VEC_LENGTH 100
 
 enum rpt_state {
 	INIT,
@@ -138,8 +140,7 @@ typedef struct {
 } index_table_row;
 
 int ghb_table_tail;
-int glbcounter;
-
+int previous_misses;
 /* ECE552 Assignment 4 - END CODE */
 
 /* block status values */

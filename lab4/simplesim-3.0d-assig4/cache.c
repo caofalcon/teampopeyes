@@ -425,7 +425,7 @@ cache_create(char *name,		/* name of the cache */
       cp->ghb[i].next = -1;
   }
   ghb_table_tail = 0;
-  glbcounter = 0;
+  previous_misses = 0;
   /* ECE552 Assignment 4 - END CODE */
 
   return cp;
@@ -536,96 +536,168 @@ void next_line_prefetcher(struct cache_t *cp, md_addr_t addr) {
 
 /* Open Ended Prefetcher */
 void open_ended_prefetcher(struct cache_t *cp, md_addr_t addr) {
-    //
+    int strideAnswered = 0;
+    int i;
+
+    // only prefetch if there was a miss
+    if (previous_misses == cp->misses) return;
+    previous_misses = cp->misses;
+
+    stride_prefetcher(cp, addr);
+    //strideAnswered = stride_prefetcher_modified(cp, addr);
+    //if (strideAnswered != 0) return;
+
+    //stride_prefetcher(cp,addr);
     md_addr_t index_table_index = get_PC() & (INDEX_TABLE_SIZE-1);
     // get the pointer to the previous head
     int prev_head = cp->index_table[index_table_index].head;
+    if (prev_head != -1) {
+        cp->ghb[prev_head].prev = ghb_table_tail;
+    }
     // check what's on the tail right now, and take it off
     if (cp->ghb[ghb_table_tail].prev != -1) {
         cp->ghb[cp->ghb[ghb_table_tail].prev].next = -1;
     }
-    // make the new head the entry on the tail
-    cp->index_table[index_table_index].head = ghb_table_tail;
-    if (prev_head == ghb_table_tail) {
-        cp->ghb[ghb_table_tail].next = NULL;
-    } else {
-        cp->ghb[ghb_table_tail].next = prev_head;
-    }
-    cp->ghb[ghb_table_tail].prev = -1;
-    if (prev_head != -1) {
-        cp->ghb[prev_head].prev = ghb_table_tail;
-    }
-    cp->ghb[ghb_table_tail].addr = addr;
     // grow the queue, circular list
-    int i;
-    for (i = 0; i < INDEX_TABLE_SIZE; i++) {
-        if (i == index_table_index) continue;
-        if (cp->index_table[i].head == ghb_table_tail) {
-            cp->index_table[i].head = -1;
-        }
-    }
     for (i = 0; i < GHB_SIZE; i++) {
         if (cp->ghb[i].next == ghb_table_tail) {
             cp->ghb[i].next = -1;
         }
     }
+    // make the new head the entry on the tail
+    cp->index_table[index_table_index].head = ghb_table_tail;
+    cp->ghb[ghb_table_tail].addr = addr;
+    if (prev_head == ghb_table_tail) {
+        cp->ghb[ghb_table_tail].next = -1;
+    } else {
+        cp->ghb[ghb_table_tail].next = prev_head;
+    }
+    cp->ghb[ghb_table_tail].prev = -1;
     ghb_table_tail = (ghb_table_tail + 1) % GHB_SIZE;
     
     // do prefetching
     // find the most recent delta pair
-    int deltaPair[2] = {0, 0};
+    int deltaPair[3] = {0, 0, 0};
     int idxListHead = cp->index_table[index_table_index].head;
     int headNext = cp->ghb[idxListHead].next;
     int headNextNext = -1;
     if (headNext == -1) {
-        stride_prefetcher(cp,addr);
         return;
     }
     deltaPair[0] = cp->ghb[idxListHead].addr - cp->ghb[headNext].addr;
     headNextNext = cp->ghb[headNext].next;
     if (headNextNext == -1) {
-        stride_prefetcher(cp,addr);
         return;
     }
     deltaPair[1] = cp->ghb[headNext].addr - cp->ghb[headNextNext].addr;
 
     int currGHBEntry = headNextNext;
-    int nextGHBEntry = cp->ghb[headNextNext].next;
-    int calculatedDelta;
-    i = 0;
+    int nextGHBEntry = cp->ghb[currGHBEntry].next;
+    int calculatedDelta = 0;
     // initialize some kind of delta table
-    int deltaTable[4];
+    int deltaTable[DELTA_TABLE_SIZE];
+
+    for (i = 0; i < DELTA_TABLE_SIZE; i++) {
+        deltaTable[i] = 0;
+    }
+
     int foundAPrefetchPair = 0;
-    glbcounter++;
     // find deltas by subtracting the addresses between list items
-    while ((nextGHBEntry != -1) && (!foundAPrefetchPair)) {
+    // printf("%d %d\n", deltaPair[0], deltaPair[1]);
+    // printf("Delta Table: ");
+    i = 0;
+    while (nextGHBEntry != -1) {
         //printf("%d - currGHBEntry = %d\n", i, currGHBEntry);
         // calculate delta between next pair
         calculatedDelta = cp->ghb[currGHBEntry].addr - cp->ghb[nextGHBEntry].addr;
         // store calculated delta in table, find when the deltaPair occurred before
         deltaTable[i] = calculatedDelta;
 
+        int f = (i+3)%DELTA_TABLE_SIZE;
+
         // do some frame shifting shit because why not
-        if (deltaTable[i] == deltaPair[0] && deltaTable[(i+3)%4] == deltaPair[1]) {
+        if (deltaTable[i] == deltaPair[1] && deltaTable[f] == deltaPair[0]) {
             // deltaTable[(i+2)%4] is a potential prefetch candidate
+            //printf("c:%d f:%d ff:%d fff:%d\n", deltaTable[i], deltaTable[(i+3)%DELTA_TABLE_SIZE], deltaTable[(i+2)%DELTA_TABLE_SIZE], deltaTable[(i+1)%DELTA_TABLE_SIZE]);
+            //printf("%d %d\n", deltaPair[0], deltaPair[1]);
+            deltaPair[0] = deltaTable[(i+2)%DELTA_TABLE_SIZE];
+            deltaPair[1] = deltaTable[(i+1)%DELTA_TABLE_SIZE];
+            //printf("%d %d\n", deltaPair[0], deltaPair[1]);
             foundAPrefetchPair++;
-            deltaPair[0] = deltaTable[(i+2)%4];
-            deltaPair[1] = deltaTable[(i+1)%4];
+            break;
         }
 
         currGHBEntry = nextGHBEntry;
         nextGHBEntry = cp->ghb[nextGHBEntry].next;
-        i = (i + 1) % 4;
+        // printf("%d->", deltaTable[i]);
+        i = (i + 1) % DELTA_TABLE_SIZE;
     }
+    // printf("%d\n", deltaTable[i]);
+    // printf("%d %d\n\n\n", deltaPair[0], deltaPair[1]);
 
     // prefetch the match
     if (foundAPrefetchPair) {
-        //printf("Found a prefetch pair!\n");
-        cache_access(cp, Read, (addr + deltaPair[0]) & ~(cp->bsize - 1), NULL, cp->bsize, 0, NULL, NULL, 1);
-        //cache_access(cp, Read, (addr + deltaPair[1]) & ~(cp->bsize - 1), NULL, cp->bsize, 0, NULL, NULL, 1);
-    } else {
-        stride_prefetcher(cp,addr);
+        if (deltaPair[0] != 0) {
+            // printf("Found a prefetch pair!\n");
+            cache_access(cp, Read, (addr + deltaPair[0]) & ~(cp->bsize - 1), NULL, cp->bsize, 0, NULL, NULL, 1);
+            //cache_access(cp, Read, (addr + (deltaPair[0] << 1)) & ~(cp->bsize - 1), NULL, cp->bsize, 0, NULL, NULL, 1);
+            if (deltaPair[1] != deltaPair[0]) {
+                cache_access(cp, Read, (addr + deltaPair[1]) & ~(cp->bsize - 1), NULL, cp->bsize, 0, NULL, NULL, 1);
+              //cache_access(cp, Read, (addr + (deltaPair[1] << 1)) & ~(cp->bsize - 1), NULL, cp->bsize, 0, NULL, NULL, 1);
+            }
+            return;
+        }
     }
+
+    // check for correlation
+    int possiblePredictions[CORRELATION_VEC_LENGTH];
+    int correspondingCounts[CORRELATION_VEC_LENGTH];
+    for (i=0; i < CORRELATION_VEC_LENGTH; i++) {
+        possiblePredictions[i] = -1;
+        correspondingCounts[i] = 0;
+    }
+    currGHBEntry = headNext;
+    int currentSpotInPred = 0;
+    int predictionToBeMade = 0;
+    int addrWasFound;
+    int sumTotal;
+    // find address correlation
+    while (currGHBEntry != -1) {
+        sumTotal = 0;
+        md_addr_t currAddr = cp->ghb[currGHBEntry].addr;
+        addrWasFound = 0;
+        //printf("%d\t", currAddr);
+        for (i=0; i < CORRELATION_VEC_LENGTH; i++) {
+            if (possiblePredictions[i] == currAddr) {
+                correspondingCounts[i]++;
+                addrWasFound = 1;
+            }
+            sumTotal += correspondingCounts[i];
+        }
+        if ((currentSpotInPred < CORRELATION_VEC_LENGTH) && !addrWasFound) {
+            possiblePredictions[currentSpotInPred] = currAddr;
+            currentSpotInPred++;
+        }
+        currGHBEntry = cp->ghb[currGHBEntry].next;
+    }
+    //printf("\n");
+
+    for (i=0; i < CORRELATION_VEC_LENGTH; i++) {
+        if (correspondingCounts[i] > (sumTotal / CORRELATION_VEC_LENGTH) && (correspondingCounts[i] > 5)) {
+            cache_access(cp, Read, possiblePredictions[i] & ~(cp->bsize - 1), NULL, cp->bsize, 0, NULL, NULL, 1);
+        }
+    }
+
+    //if (correspondingCounts[predictionToBeMade] > 5) {
+    //    cache_access(cp, Read, possiblePredictions[predictionToBeMade] & ~(cp->bsize - 1), NULL, cp->bsize, 0, NULL, NULL, 1);
+    //}
+
+
+    
+    //cache_access(cp, Read, (cp->ghb[(headNext + 1) % GHB_SIZE].addr) & ~(cp->bsize - 1), NULL, cp->bsize, 0, NULL, NULL, 1);
+    //next_line_prefetcher(cp, addr);
+    //cache_access(cp, Read, (cp->ghb[(headNextNext + 1) % GHB_SIZE].addr) & ~(cp->bsize - 1), NULL, cp->bsize, 0, NULL, NULL, 1);
+    
 }
 
 /* Stride Prefetcher */
