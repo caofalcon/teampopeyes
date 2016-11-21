@@ -534,18 +534,90 @@ void next_line_prefetcher(struct cache_t *cp, md_addr_t addr) {
 	cache_access(cp, Read, (addr & ~(cp->bsize - 1)) + cp->bsize, NULL, cp->bsize, 0, NULL, NULL, 1);
 }
 
+/* Stride Prefetcher Modified */
+int stride_prefetcher_modified(struct cache_t *cp, md_addr_t addr) {
+    int retVal = 0;
+	md_addr_t pc = get_PC();
+	int rpt_table_index = pc & (RPT_TABLE_SIZE-1);
+	rpt_row * rpt_table_entry = &(cp->rpt_table[rpt_table_index]);
+    md_addr_t fetch_addr = (addr + rpt_table_entry->stride) & ~(cp->bsize - 1);
+	if (rpt_table_entry->state == STEADY && !cache_probe(cp, fetch_addr)) {
+		cache_access(cp, Read, fetch_addr, NULL, cp->bsize, 0, NULL, NULL, 1);
+        retVal = 1;
+	}
+	// if (rpt_table_entry->state == INIT) {
+	// 	printf("%d INIT %d\n", pc, rpt_table_index);
+	// } else if (rpt_table_entry->state == STEADY) {
+	// 	printf("STEADY\n");
+	// } else if (rpt_table_entry->state == TRANS) {
+	// 	printf("TRANS\n");
+	// } else if (rpt_table_entry->state == NO_PRED) {
+	// 	printf("NO_PRED\n");
+	// }
+	// if (rpt_table_entry.tag == NULL) {
+	// 	rpt_table_entry.tag = pc >> (RPT_TABLE_SIZE-1);
+	// 	rpt_table_entry.prev_addr = addr;
+	// 	rpt_table_entry.state = INIT;
+	// 	rpt_table_entry.stride = 0;
+	// } else {
+	if (rpt_table_entry->tag == (pc >> (RPT_TABLE_SIZE-1))) {
+		switch (rpt_table_entry->state) {
+		case INIT:
+			if (rpt_table_entry->stride == (addr - rpt_table_entry->prev_addr)) {
+				rpt_table_entry->state = STEADY;
+			} else {
+				rpt_table_entry->stride = addr - rpt_table_entry->prev_addr;
+				rpt_table_entry->state = TRANS;
+			}
+			break;
+		case TRANS:
+			if (rpt_table_entry->stride == (addr - rpt_table_entry->prev_addr)) {
+				rpt_table_entry->state = STEADY;
+			} else {
+				rpt_table_entry->stride = addr - rpt_table_entry->prev_addr;
+				rpt_table_entry->state = NO_PRED;
+			}
+			break;
+		case STEADY:
+			if (rpt_table_entry->stride == (addr - rpt_table_entry->prev_addr)) {
+				rpt_table_entry->state = STEADY;
+			} else {
+				rpt_table_entry->state = INIT;
+			}
+			break;
+		default:
+			//NO PRED
+			if (rpt_table_entry->stride == (addr - rpt_table_entry->prev_addr)) {
+				rpt_table_entry->state = TRANS;
+			} else {
+				rpt_table_entry->stride = addr - rpt_table_entry->prev_addr;
+				rpt_table_entry->state = NO_PRED;
+			}
+		}
+	} else {
+		printf("TAG DID NOT MATCH!\n");
+		rpt_table_entry->state = INIT;
+		rpt_table_entry->tag = pc >> (RPT_TABLE_SIZE-1);
+		rpt_table_entry->stride = 0;
+	}
+	// }
+	rpt_table_entry->prev_addr = addr;
+    return retVal;
+}
+
 /* Open Ended Prefetcher */
 void open_ended_prefetcher(struct cache_t *cp, md_addr_t addr) {
     int strideAnswered = 0;
     int i;
+    md_addr_t fetch_addr;
 
-    // only prefetch if there was a miss
+    //stride_prefetcher(cp, addr);
+    strideAnswered = stride_prefetcher_modified(cp, addr);
     if (previous_misses == cp->misses) return;
     previous_misses = cp->misses;
+    if (strideAnswered != 0) return;
 
-    stride_prefetcher(cp, addr);
-    //strideAnswered = stride_prefetcher_modified(cp, addr);
-    //if (strideAnswered != 0) return;
+    // only prefetch if there was a miss
 
     //stride_prefetcher(cp,addr);
     md_addr_t index_table_index = get_PC() & (INDEX_TABLE_SIZE-1);
@@ -639,13 +711,17 @@ void open_ended_prefetcher(struct cache_t *cp, md_addr_t addr) {
     if (foundAPrefetchPair) {
         if (deltaPair[0] != 0) {
             // printf("Found a prefetch pair!\n");
-            cache_access(cp, Read, (addr + deltaPair[0]) & ~(cp->bsize - 1), NULL, cp->bsize, 0, NULL, NULL, 1);
-            //cache_access(cp, Read, (addr + (deltaPair[0] << 1)) & ~(cp->bsize - 1), NULL, cp->bsize, 0, NULL, NULL, 1);
-            if (deltaPair[1] != deltaPair[0]) {
-                cache_access(cp, Read, (addr + deltaPair[1]) & ~(cp->bsize - 1), NULL, cp->bsize, 0, NULL, NULL, 1);
-              //cache_access(cp, Read, (addr + (deltaPair[1] << 1)) & ~(cp->bsize - 1), NULL, cp->bsize, 0, NULL, NULL, 1);
+            fetch_addr = (addr + deltaPair[0]) & ~(cp->bsize - 1);
+            if (!cache_probe(cp, fetch_addr)) {
+                cache_access(cp, Read, fetch_addr, NULL, cp->bsize, 0, NULL, NULL, 1);
             }
-            return;
+            fetch_addr = (addr + deltaPair[1]) & ~(cp->bsize - 1);
+            //cache_access(cp, Read, (addr + (deltaPair[0] << 1)) & ~(cp->bsize - 1), NULL, cp->bsize, 0, NULL, NULL, 1);
+            if (deltaPair[1] != deltaPair[0] && !cache_probe(cp, fetch_addr)) {
+                cache_access(cp, Read, fetch_addr, NULL, cp->bsize, 0, NULL, NULL, 1);
+                //cache_access(cp, Read, (addr + (deltaPair[1] << 1)) & ~(cp->bsize - 1), NULL, cp->bsize, 0, NULL, NULL, 1);
+            }
+            //return;
         }
     }
 
@@ -676,6 +752,7 @@ void open_ended_prefetcher(struct cache_t *cp, md_addr_t addr) {
         }
         if ((currentSpotInPred < CORRELATION_VEC_LENGTH) && !addrWasFound) {
             possiblePredictions[currentSpotInPred] = currAddr;
+            correspondingCounts[i]++;
             currentSpotInPred++;
         }
         currGHBEntry = cp->ghb[currGHBEntry].next;
@@ -683,14 +760,21 @@ void open_ended_prefetcher(struct cache_t *cp, md_addr_t addr) {
     //printf("\n");
 
     for (i=0; i < CORRELATION_VEC_LENGTH; i++) {
-        if (correspondingCounts[i] > (sumTotal / CORRELATION_VEC_LENGTH) && (correspondingCounts[i] > 5)) {
-            cache_access(cp, Read, possiblePredictions[i] & ~(cp->bsize - 1), NULL, cp->bsize, 0, NULL, NULL, 1);
+        if (correspondingCounts[predictionToBeMade] < correspondingCounts[i]) {
+            fetch_addr = possiblePredictions[i] & ~(cp->bsize - 1);
+            if (!cache_probe(cp, fetch_addr)) {
+                predictionToBeMade = i;
+            }
         }
     }
 
-    //if (correspondingCounts[predictionToBeMade] > 5) {
-    //    cache_access(cp, Read, possiblePredictions[predictionToBeMade] & ~(cp->bsize - 1), NULL, cp->bsize, 0, NULL, NULL, 1);
-    //}
+    if (correspondingCounts[predictionToBeMade] > 1) {
+        fetch_addr = possiblePredictions[predictionToBeMade] & ~(cp->bsize - 1);
+        if (!cache_probe(cp, fetch_addr)) {
+            //cache_access(cp, Read, fetch_addr, NULL, cp->bsize, 0, NULL, NULL, 1);
+        }
+        //cache_access(cp, Read, possiblePredictions[predictionToBeMade] & ~(cp->bsize - 1), NULL, cp->bsize, 0, NULL, NULL, 1);
+    }
 
 
     
