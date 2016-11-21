@@ -111,7 +111,7 @@ enum cache_policy {
 #define INDEX_TABLE_SIZE 256
 #define GHB_SIZE 256
 #define DELTA_TABLE_SIZE 4
-#define CORRELATION_VEC_LENGTH 100
+#define CORRELATION_VEC_LENGTH 64
 
 enum rpt_state {
 	INIT,
